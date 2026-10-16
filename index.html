@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Interactive Sonic Aquarium</title>
+<style>
+  :root {
+    --panel: rgba(11, 24, 38, 0.72);
+    --border: rgba(125, 211, 252, 0.18);
+    --text: #e0f2fe;
+    --muted: #7dd3fc;
+    --accent: #38bdf8;
+    --warn: #f43f5e;
+    --ok: #34d399;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  body, html {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #030b14;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+  }
+
+  #app {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+
+  /* Minimal Floating HUD */
+  #hud {
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--panel);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    white-space: nowrap;
+  }
+
+  .btn, .select-pill {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(125, 211, 252, 0.16);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    padding: 6px 13px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.16s ease;
+    outline: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn:hover, .select-pill:hover {
+    background: rgba(56, 189, 248, 0.18);
+    border-color: rgba(56, 189, 248, 0.45);
+  }
+
+  .btn:active {
+    transform: scale(0.96);
+  }
+
+  .btn.active {
+    background: rgba(56, 189, 248, 0.28);
+    border-color: rgba(56, 189, 248, 0.65);
+    color: #ffffff;
+  }
+
+  #soundBtn.locked {
+    background: rgba(244, 63, 94, 0.25);
+    border-color: rgba(244, 63, 94, 0.7);
+    color: #ffe4e6;
+    animation: pulseGlow 1.6s infinite ease-in-out;
+  }
+
+  #soundBtn.unlocked {
+    background: rgba(52, 211, 153, 0.2);
+    border-color: rgba(52, 211, 153, 0.6);
+    color: #a7f3d0;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  @keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.45); }
+    50% { box-shadow: 0 0 0 8px rgba(244, 63, 94, 0); }
+  }
+
+  .divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+    margin: 0 2px;
+  }
+
+  #hintBanner {
+    position: absolute;
+    top: 72px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 15;
+    background: rgba(7, 19, 32, 0.85);
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    color: #bae6fd;
+    padding: 7px 16px;
+    border-radius: 999px;
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+  }
+
+  #hintBanner.hidden {
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <button class="btn locked" id="soundBtn" title="Enable underwater soundscape & musical chimes">
+      <span class="dot"></span>
+      <span id="soundBtnText">Enable Sound</span>
+    </button>
+    <div class="divider"></div>
+    <button class="btn" id="addFishBtn">+ Spawn Fish</button>
+    <button class="btn" id="feedFlakeBtn">Drop Food Burst</button>
+    <div class="divider"></div>
+    <select class="select-pill" id="speciesSelect" title="Fish Species">
+      <option value="random">Mixed Reef Species</option>
+      <option value="neon">Neon Tetra</option>
+      <option value="gold">Golden Koi</option>
+      <option value="angel">Royal Angelfish</option>
+      <option value="biolum">Bioluminescent Spirit</option>
+    </select>
+    <select class="select-pill" id="moodSelect" title="Lighting & Water Mood">
+      <option value="reef">Sunlit Coral Reef</option>
+      <option value="midnight">Bioluminescent Midnight</option>
+      <option value="emerald">Zen Kelp Forest</option>
+    </select>
+    <div class="divider"></div>
+    <button class="btn active" id="chimeToggleBtn" title="Play ambient marimba/harp notes when fish eat or plants sway">Musical Notes</button>
+  </div>
+
+  <div id="hintBanner">Click water to drop food &amp; tap glass &bull; Click a fish to make it dash &bull; Sweep through kelp to play harp notes</div>
+
+  <canvas id="tankCanvas"></canvas>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('tankCanvas');
+  const ctx = canvas.getContext('2d');
+
+  let W = window.innerWidth;
+  let H = window.innerHeight;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    initPlants();
+  }
+  window.addEventListener('resize', resize);
+
+  // ==========================================
+  // 1. WEB AUDIO SYNTHESIZER & WATER SOUNDSCAPE
+  // ==========================================
+  let audioCtx = null;
+  let masterGain = null;
+  let ambientGain = null;
+  let audioUnlocked = false;
+  let musicalChimesEnabled = true;
+
+  // Pentatonic frequencies for aquatic marimba/harp notes
+  const AQUA_NOTES = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25, 783.99, 880.00];
+
+  const soundBtn = document.getElementById('soundBtn');
+  const soundBtnText = document.getElementById('soundBtnText');
+  const hintBanner = document.getElementById('hintBanner');
+
+  function updateSoundUI(running) {
+    if (running) {
+      audioUnlocked = true;
+      soundBtn.classList.remove('locked');
+      soundBtn.classList.add('unlocked');
+      soundBtnText.textContent = 'Sound ON';
+      setTimeout(() => hintBanner.classList.add('hidden'), 5000);
+    } else {
+      soundBtn.classList.remove('unlocked');
+      soundBtn.classList.add('locked');
+      soundBtnText.textContent = 'Enable Sound';
+    }
+  }
+
+  function initAudio(playGreeting = false) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    if (!audioCtx) {
+      audioCtx = new AudioContextClass();
+
+      const compressor = audioCtx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-14, audioCtx.currentTime);
+      compressor.ratio.setValueAtTime(5, audioCtx.currentTime);
+
+      masterGain = audioCtx.createGain();
+      masterGain.gain.setValueAtTime(0.85, audioCtx.currentTime);
+
+      // Underwater stereo echo
+      const delay = audioCtx.createDelay(1.0);
+      delay.delayTime.setValueAtTime(0.28, audioCtx.currentTime);
+      const feedback = audioCtx.createGain();
+      feedback.gain.setValueAtTime(0.32, audioCtx.currentTime);
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1800, audioCtx.currentTime);
+
+      masterGain.connect(compressor);
+      masterGain.connect(delay);
+      delay.connect(filter);
+      filter.connect(feedback);
+      feedback.connect(delay);
+      filter.connect(compressor);
+      compressor.connect(audioCtx.destination);
+
+      // Continuous gentle underwater current ambience (filtered pink-ish noise)
+      const noiseLen = audioCtx.sampleRate * 3;
+      const noiseBuf = audioCtx.createBuffer(1, noiseLen, audioCtx.sampleRate);
+      const output = noiseBuf.getChannelData(0);
+      let b0 = 0, b1 = 0, b2 = 0;
+      for (let i = 0; i < noiseLen; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99 * b0 + white * 0.05;
+        b1 = 0.96 * b1 + white * 0.08;
+        b2 = 0.85 * b2 + white * 0.12;
+        output[i] = (b0 + b1 + b2) * 0.25;
+      }
+      const noiseNode = audioCtx.createBufferSource();
+      noiseNode.buffer = noiseBuf;
+      noiseNode.loop = true;
+
+      const waterFilter = audioCtx.createBiquadFilter();
+      waterFilter.type = 'bandpass';
+      waterFilter.frequency.setValueAtTime(240, audioCtx.currentTime);
+      waterFilter.Q.setValueAtTime(1.8, audioCtx.currentTime);
+
+      ambientGain = audioCtx.createGain();
+      ambientGain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+
+      noiseNode.connect(waterFilter);
+      waterFilter.connect(ambientGain);
+      ambientGain.connect(compressor);
+      noiseNode.start(0);
+
+      audioCtx.onstatechange = () => {
+        updateSoundUI(audioCtx.state === 'running');
+      };
+    }
+
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().then(() => updateSoundUI(audioCtx.state === 'running')).catch(() => {});
+    } else if (audioCtx.state === 'running') {
+      updateSoundUI(true);
+    }
+
+    if (playGreeting) {
+      playBubblePop(520, 0.9);
+      playAquaChime(523.25, 0.7);
+    }
+  }
+
+  ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(ev => {
+    window.addEventListener(ev, () => {
+      if (!audioUnlocked || (audioCtx && audioCtx.state !== 'running')) {
+        initAudio(true);
+      }
+    }, { passive: true });
+  });
+
+  soundBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    initAudio(true);
+  });
+
+  // Synthesize an authentic upward-pitching water bubble "bloop"
+  function playBubblePop(baseFreq = 380, volume = 0.6) {
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(baseFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * 2.4, now + 0.09);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.28 * volume, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+
+  // Synthesize resonant glass tap sound when user clicks tank
+  function playGlassTap(normY) {
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    const now = audioCtx.currentTime;
+    const freq = 180 + (1 - normY) * 260;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(freq * 0.65, now + 0.18);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.35, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + 0.26);
+  }
+
+  // Synthesize soft aquatic marimba/harp note when fish eat or kelp sways
+  function playAquaChime(freq, velocity = 0.75) {
+    if (!musicalChimesEnabled || !audioCtx || audioCtx.state !== 'running') return;
+    const now = audioCtx.currentTime;
+
+    const osc1 = audioCtx.createOscillator();
+    const osc2 = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+
+    osc1.type = 'sine';
+    osc2.type = 'triangle';
+    osc1.frequency.setValueAtTime(freq, now);
+    osc2.frequency.setValueAtTime(freq * 2, now);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.25 * velocity, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 1.35);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(masterGain);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 1.4);
+    osc2.stop(now + 1.4);
+  }
+
+  // ==========================================
+  // 2. AQUARIUM ENTITIES (FISH, PELLETS, BUBBLES, KELP)
+  // ==========================================
+  const fishes = [];
+  const pellets = [];
+  const bubbles = [];
+  const ripples = [];
+  const plants = [];
+
+  let currentMood = 'reef';
+  let selectedSpecies = 'random';
+
+  const SPECIES_PRESETS = {
+    neon: {
+      bodyColor: '#0284c7',
+      bellyColor: '#f43f5e',
+      stripeColor: '#38bdf8',
+      finColor: 'rgba(186, 230, 253, 0.75)',
+      size: [14, 19],
+      speed: 2.3,
+      tailLength: 1.1
+    },
+    gold: {
+      bodyColor: '#f97316',
+      bellyColor: '#fde047',
+      stripeColor: '#ffffff',
+      finColor: 'rgba(254, 215, 170, 0.82)',
+      size: [22, 30],
+      speed: 1.75,
+      tailLength: 1.45
+    },
+    angel: {
+      bodyColor: '#eab308',
+      bellyColor: '#a855f7',
+      stripeColor: '#1e1b4b',
+      finColor: 'rgba(233, 213, 255, 0.8)',
+      size: [20, 26],
+      speed: 1.6,
+      tailLength: 1.6
+    },
+    biolum: {
+      bodyColor: '#2dd4bf',
+      bellyColor: '#818cf8',
+      stripeColor: '#5eead4',
+      finColor: 'rgba(153, 246, 228, 0.85)',
+      size: [16, 24],
+      speed: 2.1,
+      tailLength: 1.5
+    }
+  };
+
+  function spawnFish(x, y, forcedType) {
+    const keys = Object.keys(SPECIES_PRESETS);
+    const typeKey = (forcedType && forcedType !== 'random')
+      ? forcedType
+      : keys[Math.floor(Math.random() * keys.length)];
+    const preset = SPECIES_PRESETS[typeKey];
+
+    const size = preset.size[0] + Math.random() * (preset.size[1] - preset.size[0]);
+    const angle = (Math.random() - 0.5) * 0.6 + (Math.random() > 0.5 ? 0 : Math.PI);
+
+    fishes.push({
+      typeKey,
+      preset,
+      x: x ?? (W * 0.15 + Math.random() * W * 0.7),
+      y: y ?? (H * 0.18 + Math.random() * H * 0.62),
+      vx: Math.cos(angle) * preset.speed,
+      vy: Math.sin(angle) * preset.speed * 0.3,
+      size,
+      baseSpeed: preset.speed * (0.85 + Math.random() * 0.3),
+      boost: 0,
+      tailPhase: Math.random() * Math.PI * 2,
+      tailSpeed: 0.18,
+      glow: 0,
+      noteFreq: AQUA_NOTES[Math.floor(Math.random() * AQUA_NOTES.length)]
+    });
+  }
+
+  function initPlants() {
+    plants.length = 0;
+    const count = Math.max(10, Math.floor(W / 75));
+    for (let i = 0; i < count; i++) {
+      const px = (i + 0.3 + Math.random() * 0.4) * (W / count);
+      plants.push({
+        x: px,
+        segments: 7 + Math.floor(Math.random() * 5),
+        segLen: 16 + Math.random() * 12,
+        phase: Math.random() * Math.PI * 2,
+        swayVel: 0,
+        lastStrummed: 0,
+        hue: 145 + Math.random() * 40,
+        noteFreq: AQUA_NOTES[i % AQUA_NOTES.length]
+      });
+    }
+  }
+
+  function spawnBubble(x, y, r = 3 + Math.random() * 5, playSound = false) {
+    bubbles.push({
+      x,
+      y,
+      r,
+      vy: -(1.1 + r * 0.22),
+      wobblePhase: Math.random() * Math.PI * 2
+    });
+    if (playSound) {
+      const pitch = Math.max(220, Math.min(820, 750 - r * 55));
+      playBubblePop(pitch, 0.5);
+    }
+  }
+
+  function dropFood(x, y, count = 4) {
+    for (let i = 0; i < count; i++) {
+      pellets.push({
+        x: x + (Math.random() - 0.5) * 28,
+        y: y + (Math.random() - 0.5) * 14,
+        vy: 0.75 + Math.random() * 0.45,
+        vx: (Math.random() - 0.5) * 0.4,
+        r: 3.5,
+        color: '#fbbf24'
+      });
+    }
+  }
+
+  // ==========================================
+  // 3. USER INTERACTION (FEED, TAP GLASS, STRUM KELP)
+  // ==========================================
+  let pointer = { x: -1000, y: -1000, px: -1000, py: -1000, down: false };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    initAudio(false);
+    const x = e.clientX;
+    const y = e.clientY;
+    pointer.x = pointer.px = x;
+    pointer.y = pointer.py = y;
+    pointer.down = true;
+
+    // Check if user clicked directly on a fish -> make it dash & sing!
+    for (let i = fishes.length - 1; i >= 0; i--) {
+      const f = fishes[i];
+      if (Math.hypot(x - f.x, y - f.y) < f.size * 1.6) {
+        f.boost = 4.2;
+        f.glow = 1.0;
+        const awayAngle = Math.atan2(f.y - y, f.x - x);
+        f.vx = Math.cos(awayAngle) * (f.baseSpeed + f.boost);
+        f.vy = Math.sin(awayAngle) * (f.baseSpeed + f.boost);
+        playAquaChime(f.noteFreq, 0.95);
+        for (let b = 0; b < 4; b++) {
+          spawnBubble(f.x, f.y, 2.5 + Math.random() * 3.5, b === 0);
+        }
+        ripples.push({ x: f.x, y: f.y, r: 6, maxR: 75, alpha: 0.85, color: '#38bdf8' });
+        return;
+      }
+    }
+
+    // Otherwise: Tap the glass, drop food pellets, and release bubbles
+    playGlassTap(y / H);
+    dropFood(x, y, 4);
+    for (let b = 0; b < 3; b++) {
+      spawnBubble(x + (Math.random() - 0.5) * 16, y, 3 + Math.random() * 4, b === 0);
+    }
+    ripples.push({ x, y, r: 5, maxR: 90, alpha: 0.75, color: '#7dd3fc' });
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    pointer.px = pointer.x;
+    pointer.py = pointer.y;
+    pointer.x = e.clientX;
+    pointer.y = e.clientY;
+
+    // Trail of tiny micro-bubbles when dragging finger/mouse through water
+    if (pointer.down && Math.random() < 0.45) {
+      spawnBubble(pointer.x, pointer.y, 2 + Math.random() * 3, Math.random() < 0.25);
+    }
+
+    // Check if cursor swept past any sea-kelp plant at the bottom -> strum aquatic harp note
+    const now = performance.now();
+    plants.forEach(pl => {
+      const plantTopY = H - pl.segments * pl.segLen;
+      if (pointer.y >= plantTopY - 20) {
+        if ((pointer.px < pl.x && pointer.x >= pl.x) || (pointer.px > pl.x && pointer.x <= pl.x)) {
+          if (now - pl.lastStrummed > 180) {
+            pl.lastStrummed = now;
+            pl.swayVel = (pointer.x - pointer.px) * 0.025;
+            playAquaChime(pl.noteFreq, 0.65);
+            spawnBubble(pl.x, pointer.y, 3, false);
+          }
+        }
+      }
+    });
+  });
+
+  window.addEventListener('pointerup', () => {
+    pointer.down = false;
+  });
+
+  // ==========================================
+  // 4. HUD CONTROLS
+  // ==========================================
+  document.getElementById('addFishBtn').addEventListener('click', () => {
+    initAudio(false);
+    const x = W * (0.2 + Math.random() * 0.6);
+    const y = H * (0.2 + Math.random() * 0.5);
+    spawnFish(x, y, selectedSpecies);
+    playBubblePop(460, 0.8);
+    ripples.push({ x, y, r: 8, maxR: 70, alpha: 0.85, color: '#34d399' });
+  });
+
+  document.getElementById('feedFlakeBtn').addEventListener('click', () => {
+    initAudio(false);
+    for (let i = 0; i < 10; i++) {
+      dropFood(W * (0.15 + Math.random() * 0.7), 60 + Math.random() * 40, 1);
+    }
+    playBubblePop(360, 0.75);
+  });
+
+  document.getElementById('speciesSelect').addEventListener('change', (e) => {
+    selectedSpecies = e.target.value;
+    initAudio(false);
+  });
+
+  document.getElementById('moodSelect').addEventListener('change', (e) => {
+    currentMood = e.target.value;
+    initAudio(false);
+  });
+
+  const chimeToggleBtn = document.getElementById('chimeToggleBtn');
+  chimeToggleBtn.addEventListener('click', () => {
+    musicalChimesEnabled = !musicalChimesEnabled;
+    chimeToggleBtn.classList.toggle('active', musicalChimesEnabled);
+    if (musicalChimesEnabled) playAquaChime(659.25, 0.7);
+  });
+
+  // ==========================================
+  // 5. SIMULATION & ARTISTIC RENDERING
+  // ==========================================
+  let time = 0;
+
+  function drawBackground() {
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    if (currentMood === 'reef') {
+      grad.addColorStop(0, '#072a47');
+      grad.addColorStop(0.55, '#04182b');
+      grad.addColorStop(1, '#020b14');
+    } else if (currentMood === 'midnight') {
+      grad.addColorStop(0, '#090d24');
+      grad.addColorStop(0.6, '#050714');
+      grad.addColorStop(1, '#020208');
+    } else {
+      grad.addColorStop(0, '#062c2b');
+      grad.addColorStop(0.6, '#041a1c');
+      grad.addColorStop(1, '#020c0e');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Sunbeams / Caustic light rays from surface
+    ctx.save();
+    for (let i = 0; i < 6; i++) {
+      const rayX = (W * (0.12 + i * 0.16)) + Math.sin(time * 0.4 + i) * 45;
+      const rayGrad = ctx.createLinearGradient(rayX, 0, rayX + 90, H * 0.85);
+      const alpha = currentMood === 'midnight' ? 0.025 : 0.055;
+      rayGrad.addColorStop(0, `rgba(186, 230, 253, ${alpha})`);
+      rayGrad.addColorStop(1, 'rgba(186, 230, 253, 0)');
+      ctx.fillStyle = rayGrad;
+      ctx.beginPath();
+      ctx.moveTo(rayX - 45, 0);
+      ctx.lineTo(rayX + 45, 0);
+      ctx.lineTo(rayX + 180, H * 0.85);
+      ctx.lineTo(rayX - 60, H * 0.85);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Sandy Seabed contour
+    const sandGrad = ctx.createLinearGradient(0, H - 55, 0, H);
+    sandGrad.addColorStop(0, currentMood === 'midnight' ? '#0f172a' : '#1e293b');
+    sandGrad.addColorStop(1, '#090d16');
+    ctx.fillStyle = sandGrad;
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += 40) {
+      const sy = H - 28 + Math.sin(x * 0.012) * 8;
+      ctx.lineTo(x, sy);
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function updateAndDrawPlants() {
+    plants.forEach(pl => {
+      pl.swayVel *= 0.94;
+      const baseSway = Math.sin(time * 1.4 + pl.phase) * 0.12 + pl.swayVel;
+
+      ctx.save();
+      ctx.strokeStyle = currentMood === 'midnight'
+        ? `hsla(${pl.hue + 30}, 80%, 55%, 0.55)`
+        : `hsla(${pl.hue}, 65%, 38%, 0.72)`;
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+
+      ctx.beginPath();
+      let cx = pl.x;
+      let cy = H - 20;
+      ctx.moveTo(cx, cy);
+
+      for (let s = 1; s <= pl.segments; s++) {
+        const ratio = s / pl.segments;
+        const angle = -Math.PI / 2 + baseSway * ratio * 1.8 + Math.sin(time * 2 + s * 0.5) * 0.08;
+        cx += Math.cos(angle) * pl.segLen;
+        cy += Math.sin(angle) * pl.segLen;
+        ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function updateAndDrawPellets() {
+    for (let i = pellets.length - 1; i >= 0; i--) {
+      const p = pellets[i];
+      p.y += p.vy;
+      p.x += Math.sin(time * 3 + i) * 0.35 + p.vx;
+
+      ctx.save();
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      if (p.y > H - 24) {
+        pellets.splice(i, 1);
+      }
+    }
+  }
+
+  function updateAndDrawFishes() {
+    fishes.forEach((f, idx) => {
+      // 1. Seek nearest food pellet if hungry
+      let targetPellet = null;
+      let minDist = 360;
+      let targetIndex = -1;
+
+      for (let i = 0; i < pellets.length; i++) {
+        const p = pellets[i];
+        const d = Math.hypot(p.x - f.x, p.y - f.y);
+        if (d < minDist) {
+          minDist = d;
+          targetPellet = p;
+          targetIndex = i;
+        }
+      }
+
+      if (targetPellet) {
+        const desiredAngle = Math.atan2(targetPellet.y - f.y, targetPellet.x - f.x);
+        const speed = f.baseSpeed * 1.65 + f.boost;
+        f.vx += (Math.cos(desiredAngle) * speed - f.vx) * 0.08;
+        f.vy += (Math.sin(desiredAngle) * speed - f.vy) * 0.08;
+
+        // Eat pellet if within mouth distance
+        if (minDist < f.size * 0.95) {
+          pellets.splice(targetIndex, 1);
+          f.glow = 1.0;
+          f.boost = 1.8;
+          playBubblePop(540 + Math.random() * 180, 0.7);
+          playAquaChime(f.noteFreq, 0.85);
+          spawnBubble(f.x, f.y, 3.2, false);
+          ripples.push({ x: f.x, y: f.y, r: 4, maxR: 48, alpha: 0.75, color: '#fde047' });
+        }
+      } else {
+        // Gentle autonomous schooling & wandering
+        f.vy += Math.sin(time * 1.5 + idx) * 0.015;
+        const currentSpeed = Math.hypot(f.vx, f.vy) || 1;
+        const targetSpeed = f.baseSpeed + f.boost;
+        f.vx = (f.vx / currentSpeed) * targetSpeed;
+        f.vy = (f.vy / currentSpeed) * targetSpeed;
+
+        // Keep horizontal swimming natural (avoid steep vertical stalls)
+        if (Math.abs(f.vx) < 0.6) {
+          f.vx = (f.vx >= 0 ? 1 : -1) * 0.9;
+        }
+        f.vy *= 0.985;
+      }
+
+      // Soft boundary turnarounds
+      const margin = 75;
+      if (f.x < margin) f.vx += 0.14;
+      if (f.x > W - margin) f.vx -= 0.14;
+      if (f.y < 85) f.vy += 0.12;
+      if (f.y > H - 65) f.vy -= 0.14;
+
+      f.boost *= 0.94;
+      f.glow *= 0.93;
+
+      f.x += f.vx;
+      f.y += f.vy;
+
+      const speedMag = Math.hypot(f.vx, f.vy);
+      f.tailPhase += 0.14 + speedMag * 0.08;
+
+      // Occasional spontaneous tiny breath bubble
+      if (Math.random() < 0.004) {
+        spawnBubble(f.x, f.y, 2 + Math.random() * 2.5, Math.random() < 0.4);
+      }
+
+      // Draw Fish with articulated wagging tail and fins
+      const angle = Math.atan2(f.vy, f.vx);
+      const facingLeft = Math.abs(angle) > Math.PI / 2;
+
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(angle);
+      if (facingLeft) ctx.scale(1, -1);
+
+      const s = f.size;
+      const wag = Math.sin(f.tailPhase) * (s * 0.28);
+
+      if (currentMood === 'midnight' || f.typeKey === 'biolum' || f.glow > 0.05) {
+        ctx.shadowColor = f.preset.stripeColor;
+        ctx.shadowBlur = 12 + f.glow * 22;
+      }
+
+      // Tail Fin (Animated Bezier)
+      ctx.fillStyle = f.preset.finColor;
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.85, 0);
+      ctx.quadraticCurveTo(-s * 1.4, -s * 0.65 + wag * 0.5, -s * (1.35 + f.preset.tailLength * 0.4), -s * 0.75 + wag);
+      ctx.quadraticCurveTo(-s * 1.25, wag * 0.4, -s * (1.35 + f.preset.tailLength * 0.4), s * 0.75 + wag);
+      ctx.quadraticCurveTo(-s * 1.4, s * 0.65 + wag * 0.5, -s * 0.85, 0);
+      ctx.fill();
+
+      // Dorsal & Ventral Fins
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.2, -s * 0.42);
+      ctx.quadraticCurveTo(-s * 0.55, -s * 0.95, -s * 0.75, -s * 0.32);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.1, s * 0.42);
+      ctx.quadraticCurveTo(-s * 0.4, s * 0.85, -s * 0.6, s * 0.32);
+      ctx.fill();
+
+      // Main Streamlined Body
+      const bodyGrad = ctx.createLinearGradient(-s, -s * 0.5, s, s * 0.5);
+      bodyGrad.addColorStop(0, f.preset.bodyColor);
+      bodyGrad.addColorStop(0.6, f.preset.StripeColor || f.preset.bodyColor);
+      bodyGrad.addColorStop(1, f.preset.bellyColor);
+
+      ctx.fillStyle = bodyGrad;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, s, s * 0.52, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Iridescent Lateral Stripe
+      ctx.strokeStyle = f.preset.stripeColor;
+      ctx.lineWidth = s * 0.12;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.65, 0);
+      ctx.quadraticCurveTo(0, -s * 0.1, s * 0.55, 0);
+      ctx.stroke();
+
+      // Eye
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(s * 0.52, -s * 0.12, s * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#020617';
+      ctx.beginPath();
+      ctx.arc(s * 0.56, -s * 0.12, s * 0.07, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    });
+  }
+
+  function updateAndDrawBubblesAndRipples() {
+    // Rising Bubbles
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      const b = bubbles[i];
+      b.y += b.vy;
+      b.x += Math.sin(time * 4 + b.wobblePhase) * 0.45;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(186, 230, 253, 0.55)';
+      ctx.fillStyle = 'rgba(224, 242, 254, 0.12)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Specular highlight dot on bubble
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.beginPath();
+      ctx.arc(b.x - b.r * 0.32, b.y - b.r * 0.32, b.r * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      if (b.y < -15) {
+        bubbles.splice(i, 1);
+      }
+    }
+
+    // Water Ripples
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const rp = ripples[i];
+      rp.r += 2.2;
+      rp.alpha *= 0.94;
+      ctx.save();
+      ctx.strokeStyle = rp.color;
+      ctx.globalAlpha = rp.alpha;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      if (rp.alpha < 0.02) ripples.splice(i, 1);
+    }
+  }
+
+  // Initialize tank population
+  resize();
+  for (let i = 0; i < 11; i++) {
+    spawnFish();
+  }
+
+  function animate() {
+    time += 0.016;
+    drawBackground();
+    updateAndDrawPlants();
+    updateAndDrawPellets();
+    updateAndDrawFishes();
+    updateAndDrawBubblesAndRipples();
+
+    // Ambient bubble stream from seabed
+    if (Math.random() < 0.06) {
+      spawnBubble(W * 0.18 + Math.random() * W * 0.64, H - 26, 2 + Math.random() * 4, false);
+    }
+
+    requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>
